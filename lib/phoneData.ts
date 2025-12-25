@@ -256,33 +256,105 @@ export const countries: CountryData[] = [
   { id: 'ZW', name: '津巴布韦', code: '+263', rule: { pattern: 'XX XXX XXXX', prefixes: ['71', '73', '77', '78'] } }
 ];
 
-// 生成手机号的辅助函数
+// 生成真实的本地手机号
 export function generatePhoneNumber(country: CountryData, count: number = 1): string[] {
   const results: string[] = [];
+  const maxAttempts = 1000; // 防止无限循环
 
   for (let i = 0; i < count; i++) {
-    let number = country.rule.pattern;
+    let attempts = 0;
+    let isValid = false;
+    let number = '';
 
-    // 如果有前缀列表,随机选择一个
-    if (country.rule.prefixes && country.rule.prefixes.length > 0) {
-      const prefix = country.rule.prefixes[Math.floor(Math.random() * country.rule.prefixes.length)];
-      // 替换模式中的前几位X为选定的前缀
-      let prefixIndex = 0;
-      number = number.replace(/X/g, () => {
-        if (prefixIndex < prefix.length) {
-          return prefix[prefixIndex++];
-        }
-        return String(Math.floor(Math.random() * 10));
-      });
-    } else {
-      // 没有前缀就全部随机
-      number = number.replace(/X/g, () => String(Math.floor(Math.random() * 10)));
+    while (!isValid && attempts < maxAttempts) {
+      attempts++;
+      number = country.rule.pattern;
+
+      // 如果有前缀列表,随机选择一个真实的运营商前缀
+      if (country.rule.prefixes && country.rule.prefixes.length > 0) {
+        const prefix = country.rule.prefixes[Math.floor(Math.random() * country.rule.prefixes.length)];
+
+        // 替换模式中的前几位X为选定的前缀
+        let prefixIndex = 0;
+        number = number.replace(/X/g, () => {
+          if (prefixIndex < prefix.length) {
+            return prefix[prefixIndex++];
+          }
+          // 剩余位置生成随机数字
+          return String(Math.floor(Math.random() * 10));
+        });
+      } else {
+        // 没有前缀配置的情况下全部随机（不推荐）
+        number = number.replace(/X/g, () => String(Math.floor(Math.random() * 10)));
+      }
+
+      // 验证生成的号码是否合理
+      isValid = validatePhoneNumber(number, country.id);
     }
 
-    results.push(`${country.code} ${number}`);
+    if (isValid) {
+      results.push(`${country.code} ${number}`);
+    } else {
+      // 如果实在生成不出来，至少保证前缀是真实的
+      i--;
+    }
   }
 
   return results;
+}
+
+// 验证生成的手机号是否合理（避免明显的假号）
+function validatePhoneNumber(number: string, countryId: string): boolean {
+  // 提取纯数字部分
+  const digits = number.replace(/\D/g, '');
+
+  // 基本验证：长度检查
+  if (digits.length < 7) return false;
+
+  // 避免全是相同数字（例如：888888888）
+  if (/^(.)\1+$/.test(digits)) return false;
+
+  // 避免简单的递增或递减序列（例如：123456789、987654321）
+  const isSequential = /0123456|1234567|2345678|3456789|9876543|8765432|7654321|6543210/.test(digits);
+  if (isSequential) return false;
+
+  // 避免过多的重复数字（超过60%）
+  const digitCounts = new Map<string, number>();
+  for (const digit of digits) {
+    digitCounts.set(digit, (digitCounts.get(digit) || 0) + 1);
+  }
+  const maxCount = Math.max(...digitCounts.values());
+  if (maxCount / digits.length > 0.6) return false;
+
+  // 避免后半部分全是0或全是相同数字
+  const lastHalf = digits.slice(Math.floor(digits.length / 2));
+  if (/^(.)\1+$/.test(lastHalf)) return false;
+
+  // 特殊国家的额外验证
+  switch (countryId) {
+    case 'CN':
+      // 中国手机号：确保是11位，且前3位是真实号段
+      if (digits.length !== 11) return false;
+      break;
+    case 'US':
+    case 'CA':
+      // 美国/加拿大：确保是10位数字
+      if (digits.length !== 10) return false;
+      // 第二位和第五位不能是0或1（北美号码计划规则）
+      if (digits[1] === '0' || digits[1] === '1') return false;
+      if (digits[4] === '0' || digits[4] === '1') return false;
+      break;
+    case 'JP':
+      // 日本手机号：确保是10-11位
+      if (digits.length < 10 || digits.length > 11) return false;
+      break;
+    case 'KR':
+      // 韩国手机号：确保是10-11位
+      if (digits.length < 10 || digits.length > 11) return false;
+      break;
+  }
+
+  return true;
 }
 
 // 搜索国家
